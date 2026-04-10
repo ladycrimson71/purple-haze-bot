@@ -23,6 +23,7 @@ GUILD_ID = 1468026432738299916
 
 EMPLOYEE_ROLE_NAME = "Purple Haze Employee"
 MANAGER_ROLE_NAME = "Purple Haze Manager"
+LOA_ROLE_NAME = "LOA"
 
 PAYROLL_ROLE_NAMES = [
     "🛎️ Restaurant Manager",
@@ -52,6 +53,7 @@ FIXING_HOURS_CHANNEL_NAME = "⏰│fixing-hours"
 PAYROLL_TRACKING_CHANNEL_NAME = "💰│payroll-tracking"
 LEADERBOARD_CHANNEL_NAME = "🏆│leaderboard"
 WEEKLY_HOURS_CHANNEL_NAME = "🕒│weekly-hours"
+LEAVE_OF_ABSENCE_CHANNEL_NAME = "🏝️│leave-of-absence"
 
 try:
     PACIFIC_TZ = ZoneInfo("America/Los_Angeles")
@@ -111,6 +113,9 @@ def seconds_to_hours(seconds: int) -> float:
 def has_role(member: discord.Member, role_name: str) -> bool:
     return any(role.name == role_name for role in member.roles)
 
+def is_on_loa(member: discord.Member) -> bool:
+    return has_role(member, LOA_ROLE_NAME)
+
 def get_member_role_name_from_list(member: discord.Member, role_names: list[str]) -> str | None:
     for role_name in role_names:
         if has_role(member, role_name):
@@ -160,7 +165,7 @@ def build_pretty_role_columns(guild: discord.Guild, data: dict, role_name: str) 
     if not role:
         return "_Role not found_", "_Role not found_"
 
-    members_in_role = [m for m in guild.members if role in m.roles and not m.bot]
+    members_in_role = [m for m in guild.members if role in m.roles and not m.bot and not is_on_loa(m)]
 
     if not members_in_role:
         return "_No members_", "_No members_"
@@ -230,7 +235,12 @@ def build_leaderboard_embeds(guild: discord.Guild, data: dict) -> list[discord.E
 
 def build_allhours_text(guild: discord.Guild, data: dict) -> str:
     lines = []
-    members = [m for m in guild.members if not m.bot and has_role(m, EMPLOYEE_ROLE_NAME)]
+    members = [
+        m for m in guild.members
+        if not m.bot
+        and has_role(m, EMPLOYEE_ROLE_NAME)
+        and not is_on_loa(m)
+    ]
 
     for member in members:
         user_id = str(member.id)
@@ -267,7 +277,7 @@ def build_payroll_summary_embeds(guild: discord.Guild, data: dict) -> list[disco
             embeds.append(embed)
             continue
 
-        members_in_role = [m for m in guild.members if role in m.roles and not m.bot]
+        members_in_role = [m for m in guild.members if role in m.roles and not m.bot and not is_on_loa(m)]
 
         if not members_in_role:
             embed.add_field(name="Status", value="No members in this role.", inline=False)
@@ -394,6 +404,8 @@ async def hourly_clockin_reminders():
 
         for member in guild.members:
             if member.bot:
+                continue
+            if is_on_loa(member):
                 continue
 
             user_id = str(member.id)
@@ -536,6 +548,13 @@ async def clockin(interaction: discord.Interaction):
     if not has_role(member, EMPLOYEE_ROLE_NAME):
         await interaction.response.send_message(
             "You do not have the **Purple Haze Employee** role.",
+            ephemeral=True
+        )
+        return
+
+    if is_on_loa(member):
+        await interaction.response.send_message(
+            "You are currently marked as **LOA** and cannot clock in.",
             ephemeral=True
         )
         return
@@ -793,6 +812,112 @@ async def fixtime(
         payroll_embed.add_field(name="All-Time Earnings", value=format_money(all_time_pay), inline=True)
 
         await send_channel_embed(interaction.guild, PAYROLL_TRACKING_CHANNEL_NAME, payroll_embed)
+
+@app_commands.describe(
+    action="add or remove LOA",
+    target="Employee to place on or remove from LOA",
+    reason="Reason for the LOA update"
+)
+@bot.tree.command(name="loa", description="Manager-only: add or remove Leave of Absence")
+async def loa(
+    interaction: discord.Interaction,
+    action: str,
+    target: discord.Member,
+    reason: str
+):
+    if not await require_member(interaction):
+        return
+    if not await require_channel(interaction, LEAVE_OF_ABSENCE_CHANNEL_NAME):
+        return
+
+    manager = interaction.user
+    if not has_role(manager, MANAGER_ROLE_NAME):
+        await interaction.response.send_message(
+            "You do not have the **Purple Haze Manager** role.",
+            ephemeral=True
+        )
+        return
+
+    action = action.lower().strip()
+    if action not in ["add", "remove"]:
+        await interaction.response.send_message(
+            "Action must be either **add** or **remove**.",
+            ephemeral=True
+        )
+        return
+
+    loa_role = discord.utils.get(interaction.guild.roles, name=LOA_ROLE_NAME)
+    if not loa_role:
+        await interaction.response.send_message(
+            f"The **{LOA_ROLE_NAME}** role was not found. Please create it first.",
+            ephemeral=True
+        )
+        return
+
+    if action == "add":
+        if loa_role in target.roles:
+            await interaction.response.send_message(
+                f"{target.mention} is already on **LOA**.",
+                ephemeral=True
+            )
+            return
+
+        data = load_data()
+        user_id = ensure_user(data, target)
+
+        if data[user_id]["clocked_in"] is not None:
+            start = datetime.fromisoformat(data[user_id]["clocked_in"])
+            end = datetime.now(timezone.utc)
+            worked = int((end - start).total_seconds())
+
+            data[user_id]["total_seconds"] += worked
+            data[user_id]["weekly_seconds"] += worked
+            data[user_id]["clocked_in"] = None
+            data[user_id]["last_reminder_hour"] = 0
+            save_data(data)
+
+        await target.add_roles(loa_role, reason=f"LOA added by {manager} | {reason}")
+
+        embed = make_embed(
+            "Leave of Absence Updated",
+            f"{target.mention} has been placed on **LOA**."
+        )
+        embed.add_field(name="Action", value="Add LOA", inline=True)
+        embed.add_field(name="Employee", value=target.display_name, inline=True)
+        embed.add_field(name="Manager", value=manager.display_name, inline=True)
+        embed.add_field(name="Reason", value=reason[:1024], inline=False)
+
+        await interaction.response.send_message(embed=embed)
+        return
+
+    if action == "remove":
+        if loa_role not in target.roles:
+            await interaction.response.send_message(
+                f"{target.mention} is not currently on **LOA**.",
+                ephemeral=True
+            )
+            return
+
+        await target.remove_roles(loa_role, reason=f"LOA removed by {manager} | {reason}")
+
+        embed = make_embed(
+            "Leave of Absence Updated",
+            f"{target.mention} has been removed from **LOA**."
+        )
+        embed.add_field(name="Action", value="Remove LOA", inline=True)
+        embed.add_field(name="Employee", value=target.display_name, inline=True)
+        embed.add_field(name="Manager", value=manager.display_name, inline=True)
+        embed.add_field(name="Reason", value=reason[:1024], inline=False)
+
+        await interaction.response.send_message(embed=embed)
+
+@loa.autocomplete("action")
+async def loa_action_autocomplete(interaction: discord.Interaction, current: str):
+    actions = ["add", "remove"]
+    return [
+        app_commands.Choice(name=a, value=a)
+        for a in actions if current.lower() in a.lower()
+    ]
 
 @bot.tree.command(name="leaderboard", description="Post the Purple Haze leaderboard")
 async def leaderboard(interaction: discord.Interaction):
