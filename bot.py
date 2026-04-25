@@ -52,7 +52,6 @@ CHECKING_HOURS_CHANNEL_NAME = "🕛│checking-hours"
 FIXING_HOURS_CHANNEL_NAME = "⏰│fixing-hours"
 PAYROLL_TRACKING_CHANNEL_NAME = "💰│payroll-tracking"
 LEADERBOARD_CHANNEL_NAME = "🏆│leaderboard"
-WEEKLY_HOURS_CHANNEL_NAME = "🕒│weekly-hours"
 LEAVE_OF_ABSENCE_CHANNEL_NAME = "🏝️│leave-of-absence"
 
 try:
@@ -487,10 +486,67 @@ async def before_hourly_clockin_reminders():
     await bot.wait_until_ready()
 
 # =========================
+# BUTTON TIMECLOCK PANEL
+# =========================
+class TimeclockView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Clock In", style=discord.ButtonStyle.success, custom_id="timeclock_clockin")
+    async def clock_in_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await clockin(interaction)
+
+    @discord.ui.button(label="Clock Out", style=discord.ButtonStyle.danger, custom_id="timeclock_clockout")
+    async def clock_out_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await clockout(interaction)
+
+    @discord.ui.button(label="My Hours", style=discord.ButtonStyle.primary, custom_id="timeclock_hours")
+    async def my_hours_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await hours(interaction)
+
+
+@bot.tree.command(name="panel", description="Post the clock-in button panel")
+async def timeclockpanel(interaction: discord.Interaction):
+    if not await require_member(interaction):
+        return
+
+    member = interaction.user
+    if not has_role(member, MANAGER_ROLE_NAME):
+        await interaction.response.send_message(
+            "You do not have the **Purple Haze Manager** role.",
+            ephemeral=True
+        )
+        return
+
+    # 👇 YOUR CHANNEL ID HERE
+    channel = interaction.guild.get_channel(1489448597991718992)
+
+    if channel is None:
+        await interaction.response.send_message(
+            "❌ Timeclock channel not found.",
+            ephemeral=True
+        )
+        return
+
+    embed = make_embed(
+        "Purple Haze Clock-In Station",
+        "Use the buttons below to clock in, clock out, or check your hours."
+    )
+
+    await channel.send(embed=embed, view=TimeclockView())
+
+    await interaction.response.send_message(
+        f"✅ Timeclock panel posted in {channel.mention}",
+        ephemeral=True
+    )
+
+# =========================
 # EVENTS
 # =========================
 @bot.event
 async def on_ready():
+    bot.add_view(TimeclockView())
+
     try:
         if GUILD_ID:
             guild_obj = discord.Object(id=GUILD_ID)
@@ -670,19 +726,11 @@ async def hours(interaction: discord.Interaction):
         inline=True
     )
 
-    payroll_role = get_member_role_name_from_list(member, PAYROLL_ROLE_NAMES)
-    if payroll_role:
-        embed.add_field(name="Payroll Role", value=payroll_role, inline=True)
-        embed.add_field(name="Weekly Paycheck", value=format_money(calculate_pay_for_role(payroll_role, weekly_seconds)), inline=True)
-        embed.add_field(name="All-Time Earnings", value=format_money(calculate_pay_for_role(payroll_role, total_seconds)), inline=True)
-
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="weeklyhours", description="Check your weekly hours")
 async def weeklyhours(interaction: discord.Interaction):
     if not await require_member(interaction):
-        return
-    if not await require_channel(interaction, WEEKLY_HOURS_CHANNEL_NAME):
         return
 
     member = interaction.user
@@ -698,11 +746,7 @@ async def weeklyhours(interaction: discord.Interaction):
     )
     embed.add_field(name="Weekly Time", value=format_seconds(weekly_seconds), inline=False)
 
-    payroll_role = get_member_role_name_from_list(member, PAYROLL_ROLE_NAMES)
-    if payroll_role:
-        embed.add_field(name="Current Weekly Paycheck", value=format_money(calculate_pay_for_role(payroll_role, weekly_seconds)), inline=False)
-
-    await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="allhours", description="Manager view of all employee hours")
 async def allhours(interaction: discord.Interaction):
