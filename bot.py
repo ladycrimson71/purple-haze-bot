@@ -495,17 +495,104 @@ class TimeclockView(discord.ui.View):
     @discord.ui.button(label="Clock In", style=discord.ButtonStyle.success, custom_id="timeclock_clockin")
     async def clock_in_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        await clockin(interaction)
+
+        member = interaction.user
+
+        if not has_role(member, EMPLOYEE_ROLE_NAME):
+            await interaction.followup.send("You do not have the **Purple Haze Employee** role.", ephemeral=True)
+            return
+
+        if is_on_loa(member):
+            await interaction.followup.send("You are currently marked as **LOA** and cannot clock in.", ephemeral=True)
+            return
+
+        data = load_data()
+        user_id = ensure_user(data, member)
+
+        if data[user_id]["clocked_in"] is not None:
+            await interaction.followup.send("⚠️ You're already clocked in.", ephemeral=True)
+            return
+
+        data[user_id]["clocked_in"] = datetime.now(timezone.utc).isoformat()
+        data[user_id]["last_reminder_hour"] = 0
+        save_data(data)
+
+        embed = make_embed(
+            "Clocked In",
+            f"{member.mention} clocked in at **Purple Haze Garage & Grill**."
+        )
+        embed.add_field(name="Employee", value=member.display_name, inline=True)
+        embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=True)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        await send_channel_embed(interaction.guild, TIMECLOCK_CHANNEL_NAME, embed)
 
     @discord.ui.button(label="Clock Out", style=discord.ButtonStyle.danger, custom_id="timeclock_clockout")
     async def clock_out_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        await clockout(interaction)
+
+        member = interaction.user
+
+        if not has_role(member, EMPLOYEE_ROLE_NAME):
+            await interaction.followup.send("You do not have the **Purple Haze Employee** role.", ephemeral=True)
+            return
+
+        data = load_data()
+        user_id = ensure_user(data, member)
+
+        if data[user_id]["clocked_in"] is None:
+            await interaction.followup.send("⚠️ You're not clocked in.", ephemeral=True)
+            return
+
+        start = datetime.fromisoformat(data[user_id]["clocked_in"])
+        end = datetime.now(timezone.utc)
+        worked = int((end - start).total_seconds())
+
+        data[user_id]["total_seconds"] += worked
+        data[user_id]["weekly_seconds"] += worked
+        data[user_id]["clocked_in"] = None
+        data[user_id]["last_reminder_hour"] = 0
+        save_data(data)
+
+        total_seconds = data[user_id]["total_seconds"]
+        weekly_seconds = data[user_id]["weekly_seconds"]
+
+        embed = make_embed(
+            "Clocked Out",
+            f"{member.mention} clocked out from **Purple Haze Garage & Grill**."
+        )
+        embed.add_field(name="Shift Time", value=format_seconds(worked), inline=True)
+        embed.add_field(name="Weekly Time", value=format_seconds(weekly_seconds), inline=True)
+        embed.add_field(name="All Time", value=format_seconds(total_seconds), inline=True)
+        embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=False)
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        await send_channel_embed(interaction.guild, TIMECLOCK_CHANNEL_NAME, embed)
 
     @discord.ui.button(label="My Hours", style=discord.ButtonStyle.primary, custom_id="timeclock_hours")
     async def my_hours_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-        await hours(interaction)
+
+        member = interaction.user
+        data = load_data()
+        user_id = ensure_user(data, member)
+        save_data(data)
+
+        total_seconds, weekly_seconds = calculate_live_totals(data[user_id])
+
+        embed = make_embed(
+            "Your Hours",
+            f"{member.mention}, here are your current hours."
+        )
+        embed.add_field(name="Weekly Time", value=format_seconds(weekly_seconds), inline=True)
+        embed.add_field(name="All Time", value=format_seconds(total_seconds), inline=True)
+        embed.add_field(
+            name="Clock Status",
+            value="Clocked In" if data[user_id]["clocked_in"] else "Clocked Out",
+            inline=True
+        )
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="panel", description="Post the clock-in button panel")
 async def timeclockpanel(interaction: discord.Interaction):
@@ -531,7 +618,7 @@ async def timeclockpanel(interaction: discord.Interaction):
         return
 
     embed = make_embed(
-        "Purple Haze Clock-In Station",
+        "Purple Haze Timeclock Station",
         "Use the buttons below to clock in, clock out, or check your hours."
     )
 
