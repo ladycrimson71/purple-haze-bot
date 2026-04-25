@@ -525,7 +525,6 @@ class TimeclockView(discord.ui.View):
         embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=True)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
-        await send_channel_embed(interaction.guild, TIMECLOCK_CHANNEL_NAME, embed)
 
     @discord.ui.button(label="Clock Out", style=discord.ButtonStyle.danger, custom_id="timeclock_clockout")
     async def clock_out_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -567,7 +566,6 @@ class TimeclockView(discord.ui.View):
         embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=False)
 
         await interaction.followup.send(embed=embed, ephemeral=True)
-        await send_channel_embed(interaction.guild, TIMECLOCK_CHANNEL_NAME, embed)
 
     @discord.ui.button(label="My Hours", style=discord.ButtonStyle.primary, custom_id="timeclock_hours")
     async def my_hours_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -723,7 +721,6 @@ async def clockin(interaction: discord.Interaction):
     embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=True)
 
     await respond(interaction, embed=embed, ephemeral=True)
-    await send_channel_embed(interaction.guild, TIMECLOCK_CHANNEL_NAME, embed)
 
 @bot.tree.command(name="clockout", description="Clock out from your shift")
 async def clockout(interaction: discord.Interaction):
@@ -766,7 +763,6 @@ async def clockout(interaction: discord.Interaction):
     embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=False)
 
     await respond(interaction, embed=embed, ephemeral=True)
-    await send_channel_embed(interaction.guild, TIMECLOCK_CHANNEL_NAME, embed)
 
     payroll_role = get_member_role_name_from_list(member, PAYROLL_ROLE_NAMES)
     if payroll_role:
