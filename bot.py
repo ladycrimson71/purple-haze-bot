@@ -610,17 +610,11 @@ async def clockin(interaction: discord.Interaction):
     member = interaction.user
 
     if not has_role(member, EMPLOYEE_ROLE_NAME):
-        await interaction.response.send_message(
-            "You do not have the **Purple Haze Employee** role.",
-            ephemeral=True
-        )
+        await respond(interaction, "You do not have the **Purple Haze Employee** role.", ephemeral=True)
         return
 
     if is_on_loa(member):
-        await interaction.response.send_message(
-            "You are currently marked as **LOA** and cannot clock in.",
-            ephemeral=True
-        )
+        await respond(interaction, "You are currently marked as **LOA** and cannot clock in.", ephemeral=True)
         return
 
     data = load_data()
@@ -652,10 +646,7 @@ async def clockout(interaction: discord.Interaction):
     member = interaction.user
 
     if not has_role(member, EMPLOYEE_ROLE_NAME):
-        await interaction.response.send_message(
-            "You do not have the **Purple Haze Employee** role.",
-            ephemeral=True
-        )
+        await respond(interaction, "You do not have the **Purple Haze Employee** role.", ephemeral=True)
         return
 
     data = load_data()
