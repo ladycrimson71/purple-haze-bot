@@ -494,16 +494,18 @@ class TimeclockView(discord.ui.View):
 
     @discord.ui.button(label="Clock In", style=discord.ButtonStyle.success, custom_id="timeclock_clockin")
     async def clock_in_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         await clockin(interaction)
 
     @discord.ui.button(label="Clock Out", style=discord.ButtonStyle.danger, custom_id="timeclock_clockout")
     async def clock_out_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         await clockout(interaction)
 
     @discord.ui.button(label="My Hours", style=discord.ButtonStyle.primary, custom_id="timeclock_hours")
     async def my_hours_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
         await hours(interaction)
-
 
 @bot.tree.command(name="panel", description="Post the clock-in button panel")
 async def timeclockpanel(interaction: discord.Interaction):
@@ -594,6 +596,12 @@ async def require_member(interaction: discord.Interaction):
 # =========================
 # COMMANDS
 # =========================
+async def respond(interaction: discord.Interaction, content=None, embed=None, ephemeral=True):
+    if interaction.response.is_done():
+        await interaction.followup.send(content=content, embed=embed, ephemeral=ephemeral)
+    else:
+        await interaction.response.send_message(content=content, embed=embed, ephemeral=ephemeral)
+
 @bot.tree.command(name="clockin", description="Clock in for your shift")
 async def clockin(interaction: discord.Interaction):
     if not await require_member(interaction):
@@ -619,7 +627,7 @@ async def clockin(interaction: discord.Interaction):
     user_id = ensure_user(data, member)
 
     if data[user_id]["clocked_in"] is not None:
-        await interaction.response.send_message("⚠️ You're already clocked in.", ephemeral=True)
+        await respond(interaction, "⚠️ You're already clocked in.", ephemeral=True)
         return
 
     data[user_id]["clocked_in"] = datetime.now(timezone.utc).isoformat()
@@ -633,7 +641,7 @@ async def clockin(interaction: discord.Interaction):
     embed.add_field(name="Employee", value=member.display_name, inline=True)
     embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=True)
 
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await respond(interaction, embed=embed, ephemeral=True)
     await send_channel_embed(interaction.guild, TIMECLOCK_CHANNEL_NAME, embed)
 
 @bot.tree.command(name="clockout", description="Clock out from your shift")
@@ -654,7 +662,7 @@ async def clockout(interaction: discord.Interaction):
     user_id = ensure_user(data, member)
 
     if data[user_id]["clocked_in"] is None:
-        await interaction.response.send_message("⚠️ You're not clocked in.", ephemeral=True)
+        await respond(interaction, "⚠️ You're not clocked in.", ephemeral=True)
         return
 
     start = datetime.fromisoformat(data[user_id]["clocked_in"])
@@ -679,7 +687,7 @@ async def clockout(interaction: discord.Interaction):
     embed.add_field(name="All Time", value=format_seconds(total_seconds), inline=True)
     embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=False)
 
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await respond(interaction, embed=embed, ephemeral=True)
     await send_channel_embed(interaction.guild, TIMECLOCK_CHANNEL_NAME, embed)
 
     payroll_role = get_member_role_name_from_list(member, PAYROLL_ROLE_NAMES)
@@ -726,7 +734,7 @@ async def hours(interaction: discord.Interaction):
         inline=True
     )
 
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await respond(interaction, embed=embed, ephemeral=True)
 
 @bot.tree.command(name="weeklyhours", description="Check your weekly hours")
 async def weeklyhours(interaction: discord.Interaction):
