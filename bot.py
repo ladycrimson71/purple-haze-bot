@@ -495,102 +495,17 @@ class TimeclockView(discord.ui.View):
     @discord.ui.button(label="Clock In", style=discord.ButtonStyle.success, custom_id="timeclock_clockin")
     async def clock_in_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-
-        member = interaction.user
-
-        if not has_role(member, EMPLOYEE_ROLE_NAME):
-            await interaction.followup.send("You do not have the **Purple Haze Employee** role.", ephemeral=True)
-            return
-
-        if is_on_loa(member):
-            await interaction.followup.send("You are currently marked as **LOA** and cannot clock in.", ephemeral=True)
-            return
-
-        data = load_data()
-        user_id = ensure_user(data, member)
-
-        if data[user_id]["clocked_in"] is not None:
-            await interaction.followup.send("⚠️ You're already clocked in.", ephemeral=True)
-            return
-
-        data[user_id]["clocked_in"] = datetime.now(timezone.utc).isoformat()
-        data[user_id]["last_reminder_hour"] = 0
-        save_data(data)
-
-        embed = make_embed(
-            "Clocked In",
-            f"{member.mention} clocked in at **Purple Haze Garage & Grill**."
-        )
-        embed.add_field(name="Employee", value=member.display_name, inline=True)
-        embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=True)
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await clockin(interaction)
 
     @discord.ui.button(label="Clock Out", style=discord.ButtonStyle.danger, custom_id="timeclock_clockout")
     async def clock_out_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-
-        member = interaction.user
-
-        if not has_role(member, EMPLOYEE_ROLE_NAME):
-            await interaction.followup.send("You do not have the **Purple Haze Employee** role.", ephemeral=True)
-            return
-
-        data = load_data()
-        user_id = ensure_user(data, member)
-
-        if data[user_id]["clocked_in"] is None:
-            await interaction.followup.send("⚠️ You're not clocked in.", ephemeral=True)
-            return
-
-        start = datetime.fromisoformat(data[user_id]["clocked_in"])
-        end = datetime.now(timezone.utc)
-        worked = int((end - start).total_seconds())
-
-        data[user_id]["total_seconds"] += worked
-        data[user_id]["weekly_seconds"] += worked
-        data[user_id]["clocked_in"] = None
-        data[user_id]["last_reminder_hour"] = 0
-        save_data(data)
-
-        total_seconds = data[user_id]["total_seconds"]
-        weekly_seconds = data[user_id]["weekly_seconds"]
-
-        embed = make_embed(
-            "Clocked Out",
-            f"{member.mention} clocked out from **Purple Haze Garage & Grill**."
-        )
-        embed.add_field(name="Shift Time", value=format_seconds(worked), inline=True)
-        embed.add_field(name="Weekly Time", value=format_seconds(weekly_seconds), inline=True)
-        embed.add_field(name="All Time", value=format_seconds(total_seconds), inline=True)
-        embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=False)
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await clockout(interaction)
 
     @discord.ui.button(label="My Hours", style=discord.ButtonStyle.primary, custom_id="timeclock_hours")
     async def my_hours_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
-
-        member = interaction.user
-        data = load_data()
-        user_id = ensure_user(data, member)
-        save_data(data)
-
-        total_seconds, weekly_seconds = calculate_live_totals(data[user_id])
-
-        embed = make_embed(
-            "Your Hours",
-            f"{member.mention}, here are your current hours."
-        )
-        embed.add_field(name="Weekly Time", value=format_seconds(weekly_seconds), inline=True)
-        embed.add_field(name="All Time", value=format_seconds(total_seconds), inline=True)
-        embed.add_field(
-            name="Clock Status",
-            value="Clocked In" if data[user_id]["clocked_in"] else "Clocked Out",
-            inline=True
-        )
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await hours(interaction)
 
 @bot.tree.command(name="panel", description="Post the clock-in button panel")
 async def timeclockpanel(interaction: discord.Interaction):
@@ -616,7 +531,7 @@ async def timeclockpanel(interaction: discord.Interaction):
         return
 
     embed = make_embed(
-        "Purple Haze Timeclock Station",
+        "Purple Haze Clock-In Station",
         "Use the buttons below to clock in, clock out, or check your hours."
     )
 
@@ -626,6 +541,95 @@ async def timeclockpanel(interaction: discord.Interaction):
         f"✅ Timeclock panel posted in {channel.mention}",
         ephemeral=True
     )
+
+@app_commands.describe(
+    target="Employee you want to force clock out",
+    reason="Reason for force clock out"
+)
+@bot.tree.command(name="forceclockout", description="Manager-only: force clock someone out")
+async def forceclockout(
+    interaction: discord.Interaction,
+    target: discord.Member,
+    reason: str
+):
+    if not await require_member(interaction):
+        return
+
+    manager = interaction.user
+
+    if not has_role(manager, MANAGER_ROLE_NAME):
+        await respond(
+            interaction,
+            "❌ You do not have the **Purple Haze Manager** role.",
+            ephemeral=True
+        )
+        return
+
+    data = load_data()
+    user_id = ensure_user(data, target)
+
+    if data[user_id]["clocked_in"] is None:
+        await respond(
+            interaction,
+            f"⚠️ {target.display_name} is not currently clocked in.",
+            ephemeral=True
+        )
+        return
+
+    start = datetime.fromisoformat(data[user_id]["clocked_in"])
+    end = datetime.now(timezone.utc)
+    worked = int((end - start).total_seconds())
+
+    data[user_id]["total_seconds"] += worked
+    data[user_id]["weekly_seconds"] += worked
+    data[user_id]["clocked_in"] = None
+    data[user_id]["last_reminder_hour"] = 0
+    save_data(data)
+
+    total_seconds = data[user_id]["total_seconds"]
+    weekly_seconds = data[user_id]["weekly_seconds"]
+
+    embed = make_embed(
+        "Force Clock Out",
+        f"{target.mention} was force clocked out by {interaction.user.mention}."
+    )
+
+    embed.add_field(name="Employee", value=target.display_name, inline=True)
+    embed.add_field(name="Forced By", value=interaction.user.display_name, inline=True)
+    embed.add_field(name="Shift Added", value=format_seconds(worked), inline=True)
+    embed.add_field(name="Weekly Time", value=format_seconds(weekly_seconds), inline=True)
+    embed.add_field(name="All Time", value=format_seconds(total_seconds), inline=True)
+    embed.add_field(name="Reason", value=reason[:1024], inline=False)
+    embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=False)
+
+    await respond(interaction, embed=embed, ephemeral=True)
+
+    payroll_role = get_member_role_name_from_list(target, PAYROLL_ROLE_NAMES)
+
+    if payroll_role:
+        weekly_pay = calculate_pay_for_role(payroll_role, weekly_seconds)
+        all_time_pay = calculate_pay_for_role(payroll_role, total_seconds)
+        shift_pay = calculate_pay_for_role(payroll_role, worked)
+
+        payroll_embed = make_embed(
+            "Payroll Tracking - Force Clock Out",
+            f"{target.mention} was force clocked out."
+        )
+
+        payroll_embed.add_field(name="Discord Name", value=target.display_name, inline=True)
+        payroll_embed.add_field(name="Role", value=payroll_role, inline=True)
+        payroll_embed.add_field(name="Rate", value=f"{format_money(HOURLY_RATES.get(payroll_role, 0))}/hr", inline=True)
+        payroll_embed.add_field(name="Shift Added", value=format_seconds(worked), inline=True)
+        payroll_embed.add_field(name="Shift Pay", value=format_money(shift_pay), inline=True)
+        payroll_embed.add_field(name="Weekly Paycheck Total", value=format_money(weekly_pay), inline=True)
+        payroll_embed.add_field(name="All-Time Earnings", value=format_money(all_time_pay), inline=False)
+        payroll_embed.add_field(name="Reason", value=reason[:1024], inline=False)
+
+        await send_channel_embed(
+            interaction.guild,
+            PAYROLL_TRACKING_CHANNEL_NAME,
+            payroll_embed
+        )
 
 # =========================
 # EVENTS
@@ -695,11 +699,17 @@ async def clockin(interaction: discord.Interaction):
     member = interaction.user
 
     if not has_role(member, EMPLOYEE_ROLE_NAME):
-        await respond(interaction, "You do not have the **Purple Haze Employee** role.", ephemeral=True)
+        await interaction.response.send_message(
+            "You do not have the **Purple Haze Employee** role.",
+            ephemeral=True
+        )
         return
 
     if is_on_loa(member):
-        await respond(interaction, "You are currently marked as **LOA** and cannot clock in.", ephemeral=True)
+        await interaction.response.send_message(
+            "You are currently marked as **LOA** and cannot clock in.",
+            ephemeral=True
+        )
         return
 
     data = load_data()
@@ -721,6 +731,7 @@ async def clockin(interaction: discord.Interaction):
     embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=True)
 
     await respond(interaction, embed=embed, ephemeral=True)
+    await send_channel_embed(interaction.guild, TIMECLOCK_CHANNEL_NAME, embed)
 
 @bot.tree.command(name="clockout", description="Clock out from your shift")
 async def clockout(interaction: discord.Interaction):
@@ -730,7 +741,10 @@ async def clockout(interaction: discord.Interaction):
     member = interaction.user
 
     if not has_role(member, EMPLOYEE_ROLE_NAME):
-        await respond(interaction, "You do not have the **Purple Haze Employee** role.", ephemeral=True)
+        await interaction.response.send_message(
+            "You do not have the **Purple Haze Employee** role.",
+            ephemeral=True
+        )
         return
 
     data = load_data()
@@ -763,6 +777,7 @@ async def clockout(interaction: discord.Interaction):
     embed.add_field(name="Time", value=f"<t:{current_unix()}:F>", inline=False)
 
     await respond(interaction, embed=embed, ephemeral=True)
+    await send_channel_embed(interaction.guild, TIMECLOCK_CHANNEL_NAME, embed)
 
     payroll_role = get_member_role_name_from_list(member, PAYROLL_ROLE_NAMES)
     if payroll_role:
