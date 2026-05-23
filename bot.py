@@ -494,18 +494,15 @@ class TimeclockView(discord.ui.View):
 
     @discord.ui.button(label="Clock In", style=discord.ButtonStyle.success, custom_id="timeclock_clockin")
     async def clock_in_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        await clockin(interaction)
+        await clockin.callback(interaction)
 
     @discord.ui.button(label="Clock Out", style=discord.ButtonStyle.danger, custom_id="timeclock_clockout")
     async def clock_out_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        await clockout(interaction)
+        await clockout.callback(interaction)
 
     @discord.ui.button(label="My Hours", style=discord.ButtonStyle.primary, custom_id="timeclock_hours")
     async def my_hours_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        await hours(interaction)
+        await hours.callback(interaction)
 
 @bot.tree.command(name="panel", description="Post the clock-in button panel")
 async def timeclockpanel(interaction: discord.Interaction):
